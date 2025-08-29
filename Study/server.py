@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pymysql
+from fastapi.staticfiles import StaticFiles
+import os
+
 
 app = FastAPI()
+# 프로젝트 안 images 디렉토리를 정적 경로로 마운트
 
 class User(BaseModel):
     username: str
@@ -12,6 +16,11 @@ class User(BaseModel):
     birth: str
     gender: str
 
+# 로그인 전용 (새로 추가)
+class LoginUser(BaseModel):
+    username: str
+    password: str
+    
 # CORS 허용 (HTML에서 API 호출 가능하게 해줌)
 app.add_middleware(
     CORSMiddleware,
@@ -51,7 +60,7 @@ def get_rooms():
 
 
 @app.post("/login")
-def login(user: User):
+def login(user: LoginUser):
     conn = pymysql.connect(**db_config, charset="utf8mb4")
     cursor = conn.cursor(pymysql.cursors.DictCursor)
     cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", 
@@ -90,5 +99,29 @@ def signup(user: User):
     except Exception as e:
         conn.rollback()
         return {"error": str(e)}
-    finally:
-        conn.close()
+    
+@app.get("/room/{room_id}")
+def get_room(room_id: int):
+    conn = pymysql.connect(**db_config, charset="utf8mb4")
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+
+    cursor.execute("""
+        SELECT id, property_address, transaction_type, deposit, rent, management_fee,
+               latitude, longitude
+        FROM room WHERE id=%s
+    """, (room_id,))
+    room = cursor.fetchone()
+
+    cursor.execute("SELECT image_path FROM images WHERE property_id=%s ORDER BY image_order", (room_id,))
+    rows = cursor.fetchall()
+
+    # 파일명만 추출 → URL 변환
+    images = []
+    for r in rows:
+        filename = r["image_path"]
+        images.append({"image_path": f"http://127.0.0.1:8000/images/{filename}"})
+
+    conn.close()
+    return {"room": room, "images": images}
+
+app.mount("/images", StaticFiles(directory="C:/githome/WebData_Crawling/Study/scraped_data/img"), name="images")
